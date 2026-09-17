@@ -1,0 +1,3 @@
+# Python bytecode from .github/scripts release tooling
+__pycache__/
+*.pyc

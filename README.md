@@ -20,6 +20,7 @@ An idiomatic Go client for the [TypeSafe AI](https://typesafe.ai) System One API
 
 - Typed `Noul`, `Choice`, and `Score` questions and their answers
 - Single `SystemOne` call with typed answer lookup helpers
+- Generic `SystemOneAs[T]` to decode responses into your own typed structs
 - Model discovery via `client.Models.List`
 - Environment-based configuration with explicit overrides
 - Configurable per-attempt timeouts and exponential-backoff retries
@@ -82,6 +83,52 @@ answers in `SystemOneResponse.Answers` and provide typed lookup helpers
 (`Noul`, `Choice`, `Score`). List available models with
 `client.Models.List(ctx)`.
 
+## Typed responses (`SystemOneAs`)
+
+`SystemOneAs[T]` answers the same request as `SystemOne` but decodes the response
+into a type you define. Each answer is lifted from `answers.{name}` to a
+top-level key, so you can declare typed answer fields directly:
+
+```go
+type Triage struct {
+	Model    string                `json:"model"`
+	Urgent   typesafe.NoulAnswer   `json:"urgent"`
+	Category typesafe.ChoiceAnswer `json:"category"`
+}
+
+triage, err := typesafe.SystemOneAs[Triage](context.Background(), client, typesafe.SystemOneRequest{
+	State: map[string]any{"document": "I was charged twice."},
+	Questions: map[string]typesafe.Question{
+		"urgent":   typesafe.Noul("Is this urgent?"),
+		"category": typesafe.Choice("What is this about?", map[string]any{"billing": nil, "other": nil}),
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(triage.Category.Choice)
+```
+
+Three behaviors differ from `SystemOne`, by design:
+
+- **Presence is not validated.** Decoding uses `encoding/json`, which checks
+  field types but not presence. A missing answer or field decodes to its zero
+  value with no error. Declare pointer fields and nil-check them (or use
+  `SystemOne`) when you need to distinguish "absent" from "zero".
+- **No metadata on success.** `SystemOneAs` returns only your type, so the
+  request ID and headers are not attached. They remain on
+  `*ResponseValidationError` when decoding fails, and on `SystemOne`.
+- **Unknown answer types are dropped** — from both the lifted keys and any
+  retained `answers` object — so a field for a future answer type stays
+  zero-valued rather than erroring. Use `SystemOne` to inspect unknown answers as
+  `UnknownAnswer`.
+
+`T` may also keep the pruned answers object alongside lifted fields by declaring
+a nested `Answers map[string]json.RawMessage` (or a struct of known answer
+types). The full `Answers` **interface** map and the `Noul`/`Choice`/`Score`
+lookup helpers are available only on `SystemOne` (an interface map cannot be
+JSON-decoded).
+
 ## Configuration
 
 `NewClient` accepts an optional `Config`. Explicit values take precedence over
@@ -124,6 +171,14 @@ Status codes map to `*BadRequestError` (400), `*AuthenticationError` (401),
 `*UnprocessableEntityError` (422), `*RateLimitError` (429), and
 `*InternalServerError` (5xx). Transport-level failures surface as
 `*APIConnectionError`, `*APITimeoutError`, and `*APIUserAbortError`.
+
+A successful HTTP response whose body cannot be decoded surfaces as
+`*ResponseValidationError`, which carries the request metadata (`.Meta`) and the
+raw body (`.Body`) and wraps `ErrInvalidResponse`. Non-2xx responses still return
+a typed `*APIError` carrying `.RequestID` for both `SystemOne` and `SystemOneAs`;
+what `SystemOneAs` omits is metadata on a *successful* decode (use `SystemOne`
+when you need the request ID on success). Avoid logging `.Body` unredacted in
+production — it echoes the request `state`, which may contain sensitive data.
 
 ## Documentation
 

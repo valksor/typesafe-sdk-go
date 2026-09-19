@@ -126,8 +126,25 @@ func (c *Client) DefaultModel() string { return c.defaultModel }
 
 // SystemOne answers named questions about text or structured state.
 func (c *Client) SystemOne(ctx context.Context, request SystemOneRequest, options ...RequestOptions) (*SystemOneResponse, error) {
-	if err := validateQuestions(request.Questions); err != nil {
+	data, meta, err := c.systemOneRaw(ctx, request, options...)
+	if err != nil {
 		return nil, err
+	}
+	response, err := decodeSystemOne(data)
+	if err != nil {
+		return nil, &ResponseValidationError{Cause: err, Meta: meta, Body: append([]byte(nil), data...)}
+	}
+	response.Meta = meta
+	return response, nil
+}
+
+// systemOneRaw validates the request, builds the body, and performs the HTTP
+// call shared by SystemOne and SystemOneAs. It returns the raw response body so
+// callers can decode it into either the built-in SystemOneResponse or a
+// caller-supplied type.
+func (c *Client) systemOneRaw(ctx context.Context, request SystemOneRequest, options ...RequestOptions) ([]byte, ResponseMeta, error) {
+	if err := validateQuestions(request.Questions); err != nil {
+		return nil, ResponseMeta{}, err
 	}
 	model := strings.TrimSpace(request.Model)
 	if model == "" {
@@ -141,16 +158,7 @@ func (c *Client) SystemOne(ctx context.Context, request SystemOneRequest, option
 	body["questions"] = request.Questions
 	body["model"] = model
 
-	data, meta, err := c.request(ctx, http.MethodPost, "/v1/systemone", body, oneRequestOptions(options))
-	if err != nil {
-		return nil, err
-	}
-	response, err := decodeSystemOne(data)
-	if err != nil {
-		return nil, &ResponseValidationError{Cause: err, Meta: meta, Body: append([]byte(nil), data...)}
-	}
-	response.Meta = meta
-	return response, nil
+	return c.request(ctx, http.MethodPost, "/v1/systemone", body, oneRequestOptions(options))
 }
 
 func (c *Client) request(ctx context.Context, method, path string, body JSONValue, options RequestOptions) ([]byte, ResponseMeta, error) {

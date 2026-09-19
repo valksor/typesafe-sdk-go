@@ -95,6 +95,15 @@ func decodeSystemOne(body []byte) (*SystemOneResponse, error) {
 	return &SystemOneResponse{Model: wire.Model, Answers: answers, Usage: *wire.Usage}, nil
 }
 
+// knownAnswerTypes is the single source of truth for the answer discriminators
+// this SDK version models. The switch in decodeAnswer and the forward-compat
+// check in liftAnswers (response_model.go) must both stay consistent with it.
+var knownAnswerTypes = map[string]struct{}{
+	"noul":   {},
+	"choice": {},
+	"score":  {},
+}
+
 func decodeAnswer(raw json.RawMessage) (Answer, error) {
 	var tag struct {
 		Type string `json:"type"`

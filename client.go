@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const defaultTimeout = 10 * time.Second
@@ -74,6 +75,9 @@ func NewClient(configs ...Config) (*Client, error) {
 	apiKey := firstNonBlank(config.APIKey, os.Getenv("TYPESAFE_API_KEY"))
 	if apiKey == "" {
 		return nil, fmt.Errorf("no API key provided; set Config.APIKey or TYPESAFE_API_KEY: %w", ErrInvalidRequest)
+	}
+	if err := validateAPIKey(apiKey); err != nil {
+		return nil, err
 	}
 	baseURL := firstNonBlank(config.BaseURL, os.Getenv("TYPESAFE_BASE_URL"), DefaultBaseURL)
 	baseURL = strings.TrimRight(baseURL, "/")
@@ -286,6 +290,19 @@ func retryable(err error, policy RetryPolicy) bool {
 		return ok
 	}
 	return false
+}
+
+// validateAPIKey rejects keys that are not printable ASCII or that contain
+// whitespace. Such a value cannot form a valid Authorization header and would
+// otherwise fail deep in the HTTP stack with a less actionable error; rejecting
+// it here keeps a malformed credential out of the request entirely.
+func validateAPIKey(key string) error {
+	for _, r := range key {
+		if r > unicode.MaxASCII || r == ' ' || !unicode.IsPrint(r) {
+			return fmt.Errorf("API key must contain only printable ASCII characters without whitespace: %w", ErrInvalidRequest)
+		}
+	}
+	return nil
 }
 
 func firstNonBlank(values ...string) string {

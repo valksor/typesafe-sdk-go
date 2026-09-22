@@ -3,7 +3,7 @@ package typesafe
 
 const (
 	// Version is the SDK version sent in request headers.
-	Version = "0.7.0"
+	Version = "0.7.1"
 
 	DefaultBaseURL = "https://api.typesafe.ai"
 	DefaultModel   = "jev-latest"

@@ -173,6 +173,35 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
+func TestNewClientRejectsInvalidAPIKey(t *testing.T) {
+	t.Parallel()
+	invalid := map[string]string{
+		"internal space": "abc def",
+		"tab":            "abc\tdef",
+		"newline":        "abc\ndef",
+		"control char":   "abc\x01def",
+		"non-ascii":      "abcdéf",
+		"del char":       "abc\x7fdef",
+	}
+	for name, key := range invalid {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := typesafe.NewClient(typesafe.Config{APIKey: key})
+			if !errors.Is(err, typesafe.ErrInvalidRequest) {
+				t.Fatalf("error = %v, want ErrInvalidRequest", err)
+			}
+		})
+	}
+}
+
+func TestNewClientAcceptsPrintableASCIIKey(t *testing.T) {
+	t.Parallel()
+	// Surrounding whitespace is trimmed during resolution; the punctuation-rich key is valid.
+	if _, err := typesafe.NewClient(typesafe.Config{APIKey: "  sk-Test_123.ABC-xyz+/=  "}); err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+}
+
 func TestQuestionValidation(t *testing.T) {
 	t.Parallel()
 	client, err := typesafe.NewClient(typesafe.Config{APIKey: "test"})

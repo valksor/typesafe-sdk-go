@@ -145,6 +145,24 @@ and 5xx responses, connection errors, and timeouts twice with exponential
 backoff. Pass `Config.Retry` for client-wide behavior or per-call
 `RequestOptions` to override it for a single request.
 
+The API key is validated when the client is constructed: it is trimmed and must
+be non-empty printable ASCII with no whitespace. A key containing whitespace,
+control, or non-ASCII characters fails fast with `ErrInvalidRequest`.
+
+### AI gateways
+
+To route requests through an OpenAI-style AI gateway or reverse proxy, point the
+client at the gateway with `Config.BaseURL` (or the `TYPESAFE_BASE_URL`
+environment variable). The gateway forwards the `Authorization` header and other
+request headers unchanged:
+
+```go
+client, err := typesafe.NewClient(typesafe.Config{
+	APIKey:  os.Getenv("TYPESAFE_API_KEY"),
+	BaseURL: "https://gateway.example.com/typesafe",
+})
+```
+
 ## Error handling
 
 HTTP failures support `errors.As` with `*typesafe.APIError` and status-specific

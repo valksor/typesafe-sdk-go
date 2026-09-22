@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.7.1 (2026-09-22)
+
+- Track upstream Python SDK 0.7.1. No wire-contract change.
+- Validate the API key when the client is constructed: the resolved key is trimmed and rejected
+  if it is empty or contains whitespace, control characters, or non-ASCII characters. A malformed
+  credential now fails fast at `NewClient` with `ErrInvalidRequest` instead of forming a broken
+  `Authorization` header that fails later in the HTTP stack.
+- Document pointing the client at an OpenAI-style AI gateway by overriding `Config.BaseURL` (or
+  `TYPESAFE_BASE_URL`).
+- Upstream's exception-redaction fix masks credential values that Python's `httpx` can embed in a
+  transport exception's message or chain. Go's `net/http` transport errors do not carry request
+  header values (and already strip URL-embedded passwords), so a connection or timeout error
+  surfaced by this SDK cannot contain the API key; there is no equivalent to port beyond the
+  early validation above.
+
 ## v0.7.0 (2026-09-19)
 
 - Track upstream Python and JavaScript SDK 0.7.0. No wire-contract change.

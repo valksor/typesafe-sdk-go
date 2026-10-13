@@ -3,6 +3,7 @@ package typesafe
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 )
 
 // JSONValue is a value accepted by encoding/json. State, instructions, and
@@ -29,14 +30,19 @@ func (q RawQuestion) validate(name string) error {
 	if q.questionType() == "" {
 		return fmt.Errorf("raw question %q requires a nonempty string type: %w", name, ErrInvalidRequest)
 	}
-	if (q.questionType() == "choice" || q.questionType() == "score") && q["criteria"] == nil {
-		return fmt.Errorf("raw question %q requires criteria: %w", name, ErrInvalidRequest)
+	switch q.questionType() {
+	case "choice":
+		return validateChoiceCriteria(name, q["criteria"])
+	case "score":
+		return validateScoreCriteria(name, q["criteria"])
+	case "noul":
+		return validateNoul(name, q["instructions"], q["criteria"])
 	}
 	return nil
 }
 
 func (q RawQuestion) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]JSONValue(q))
+	return json.Marshal(sanitizeNonFinite(map[string]JSONValue(q)))
 }
 
 // NoulCriteria optionally describes the yes and no outcomes.
@@ -60,15 +66,18 @@ func Noul(instructions JSONValue, criteria ...NoulCriteria) NoulQuestion {
 	return q
 }
 
-func (NoulQuestion) questionType() string  { return "noul" }
-func (NoulQuestion) validate(string) error { return nil }
+func (NoulQuestion) questionType() string { return "noul" }
+
+func (q NoulQuestion) validate(name string) error {
+	return validateNoul(name, q.Instructions, q.Criteria)
+}
 
 func (q NoulQuestion) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Type         string        `json:"type"`
 		Instructions JSONValue     `json:"instructions,omitempty"`
 		Criteria     *NoulCriteria `json:"criteria,omitempty"`
-	}{Type: q.questionType(), Instructions: q.Instructions, Criteria: q.Criteria})
+	}{Type: q.questionType(), Instructions: sanitizeNonFinite(q.Instructions), Criteria: q.Criteria.sanitized()})
 }
 
 // ChoiceQuestion selects one named option. Criteria maps labels to optional
@@ -86,18 +95,15 @@ func Choice(instructions JSONValue, criteria map[string]JSONValue) ChoiceQuestio
 func (ChoiceQuestion) questionType() string { return "choice" }
 
 func (q ChoiceQuestion) validate(name string) error {
-	if q.Criteria == nil {
-		return fmt.Errorf("choice question %q requires criteria: %w", name, ErrInvalidRequest)
-	}
-	return nil
+	return validateChoiceCriteria(name, q.Criteria)
 }
 
 func (q ChoiceQuestion) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Type         string               `json:"type"`
-		Instructions JSONValue            `json:"instructions,omitempty"`
-		Criteria     map[string]JSONValue `json:"criteria"`
-	}{Type: q.questionType(), Instructions: q.Instructions, Criteria: q.Criteria})
+		Type         string    `json:"type"`
+		Instructions JSONValue `json:"instructions,omitempty"`
+		Criteria     JSONValue `json:"criteria"`
+	}{Type: q.questionType(), Instructions: sanitizeNonFinite(q.Instructions), Criteria: sanitizeNonFinite(q.Criteria)})
 }
 
 // ScoreQuestion rates state against ordered criteria indexed from zero.
@@ -114,18 +120,74 @@ func Score(instructions JSONValue, criteria ...JSONValue) ScoreQuestion {
 func (ScoreQuestion) questionType() string { return "score" }
 
 func (q ScoreQuestion) validate(name string) error {
-	if len(q.Criteria) < 2 {
-		return fmt.Errorf("score question %q has %d criteria; at least two are required: %w", name, len(q.Criteria), ErrInvalidRequest)
-	}
-	return nil
+	return validateScoreCriteria(name, q.Criteria)
 }
 
 func (q ScoreQuestion) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Type         string      `json:"type"`
-		Instructions JSONValue   `json:"instructions,omitempty"`
-		Criteria     []JSONValue `json:"criteria"`
-	}{Type: q.questionType(), Instructions: q.Instructions, Criteria: q.Criteria})
+		Type         string    `json:"type"`
+		Instructions JSONValue `json:"instructions,omitempty"`
+		Criteria     JSONValue `json:"criteria"`
+	}{Type: q.questionType(), Instructions: sanitizeNonFinite(q.Instructions), Criteria: sanitizeNonFinite(q.Criteria)})
+}
+
+// emptyContainer reports whether criteria is nil or a map, slice, or array with
+// no entries. Any other non-nil value is left for the API to judge.
+func emptyContainer(criteria JSONValue) bool {
+	if criteria == nil {
+		return true
+	}
+	switch v := reflect.ValueOf(criteria); v.Kind() {
+	case reflect.Map, reflect.Slice, reflect.Array:
+		return v.Len() == 0
+	}
+	return false
+}
+
+// validateChoiceCriteria rejects a choice question with no criteria; at least
+// one choice is required. A nil or missing value counts as empty.
+func validateChoiceCriteria(name string, criteria JSONValue) error {
+	if emptyContainer(criteria) {
+		return fmt.Errorf("choice question %q has no criteria; at least one choice is required: %w", name, ErrInvalidRequest)
+	}
+	return nil
+}
+
+// validateScoreCriteria rejects a score question with no criteria; at least
+// one score is required. A nil or missing value counts as empty.
+func validateScoreCriteria(name string, criteria JSONValue) error {
+	if emptyContainer(criteria) {
+		return fmt.Errorf("score question %q has no criteria; at least one score is required: %w", name, ErrInvalidRequest)
+	}
+	return nil
+}
+
+// validateNoul rejects a noul question whose criteria is not an object, or that
+// has neither instructions nor a described outcome. Criteria may be any map, or
+// a NoulCriteria (or pointer to one). A map entry is described unless it is a
+// nil interface value.
+func validateNoul(name string, instructions, criteria JSONValue) error {
+	described := false
+	switch c := criteria.(type) {
+	case nil:
+	case NoulCriteria:
+		described = c.True != nil || c.False != nil
+	case *NoulCriteria:
+		described = c != nil && (c.True != nil || c.False != nil)
+	default:
+		v := reflect.ValueOf(criteria)
+		if v.Kind() != reflect.Map {
+			return fmt.Errorf("noul question %q criteria must be an object: %w", name, ErrInvalidRequest)
+		}
+		for iter := v.MapRange(); iter.Next() && !described; {
+			value := iter.Value()
+			described = value.Kind() != reflect.Interface || !value.IsNil()
+		}
+	}
+	if instructions == nil && !described {
+		return fmt.Errorf("noul question %q has neither instructions nor criteria; at least one is required: %w", name, ErrInvalidRequest)
+	}
+	return nil
 }
 
 func validateQuestions(questions map[string]Question) error {

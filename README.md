@@ -83,6 +83,11 @@ answers in `SystemOneResponse.Answers` and provide typed lookup helpers
 (`Noul`, `Choice`, `Score`). List available models with
 `client.Models.List(ctx)`.
 
+Requests are validated before any HTTP call: `State` must be non-nil, `Choice` and
+`Score` need at least one criterion, and `Noul` needs instructions or at least one
+described outcome. NaN and infinite floats in state, instructions, and criteria are
+sent as the strings `"NaN"`, `"Infinity"`, and `"-Infinity"`.
+
 ## Typed responses (`SystemOneAs`)
 
 `SystemOneAs[T]` answers the same request as `SystemOne` but decodes the response
@@ -144,6 +149,10 @@ The default timeout is 10 seconds per attempt. The client retries HTTP 408, 429,
 and 5xx responses, connection errors, and timeouts twice with exponential
 backoff. Pass `Config.Retry` for client-wide behavior or per-call
 `RequestOptions` to override it for a single request.
+
+Without `Config.HTTPClient` the client keeps up to 100 pooled connections alive for
+30 seconds, so bursts of concurrent requests reuse TLS connections. A supplied
+`HTTPClient` is used as-is.
 
 The API key is validated when the client is constructed: it is trimmed and must
 be non-empty printable ASCII with no whitespace. A key containing whitespace,

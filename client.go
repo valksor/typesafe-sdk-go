@@ -102,7 +102,7 @@ func NewClient(configs ...Config) (*Client, error) {
 	}
 	httpClient := config.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{}
+		httpClient = &http.Client{Transport: pooledTransport()}
 	}
 	logger := config.Logger
 	if logger == nil {
@@ -120,6 +120,24 @@ func NewClient(configs ...Config) (*Client, error) {
 	}
 	client.Models = &ModelsService{client: client}
 	return client, nil
+}
+
+// pooledTransport clones the default transport with a larger idle pool. The
+// default keeps only two idle connections per host, so a burst of concurrent
+// requests reopens connections, and their TLS handshakes, instead of reusing
+// them. It returns nil when http.DefaultTransport has been replaced, so the
+// client uses whatever transport the program installed.
+func pooledTransport() http.RoundTripper {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil
+	}
+	transport := base.Clone()
+	transport.MaxIdleConns = 100
+	transport.MaxIdleConnsPerHost = 100
+	transport.MaxConnsPerHost = 100
+	transport.IdleConnTimeout = 30 * time.Second
+	return transport
 }
 
 // BaseURL returns the configured API root.
@@ -147,6 +165,9 @@ func (c *Client) SystemOne(ctx context.Context, request SystemOneRequest, option
 // callers can decode it into either the built-in SystemOneResponse or a
 // caller-supplied type.
 func (c *Client) systemOneRaw(ctx context.Context, request SystemOneRequest, options ...RequestOptions) ([]byte, ResponseMeta, error) {
+	if request.State == nil {
+		return nil, ResponseMeta{}, fmt.Errorf("state is required: %w", ErrInvalidRequest)
+	}
 	if err := validateQuestions(request.Questions); err != nil {
 		return nil, ResponseMeta{}, err
 	}
@@ -156,9 +177,9 @@ func (c *Client) systemOneRaw(ctx context.Context, request SystemOneRequest, opt
 	}
 	body := make(map[string]JSONValue, len(request.ExtraBody)+3)
 	for key, value := range request.ExtraBody {
-		body[key] = value
+		body[key] = sanitizeNonFinite(value)
 	}
-	body["state"] = request.State
+	body["state"] = sanitizeNonFinite(request.State)
 	body["questions"] = request.Questions
 	body["model"] = model
 

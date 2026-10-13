@@ -210,7 +210,7 @@ func TestQuestionValidation(t *testing.T) {
 	}
 	_, err = client.SystemOne(context.Background(), typesafe.SystemOneRequest{
 		State:     "state",
-		Questions: map[string]typesafe.Question{"score": typesafe.Score("Rate it", "only one")},
+		Questions: map[string]typesafe.Question{"score": typesafe.Score("Rate it")},
 	})
 	if !errors.Is(err, typesafe.ErrInvalidRequest) {
 		t.Fatalf("error = %v", err)

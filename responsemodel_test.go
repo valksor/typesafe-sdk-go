@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,7 +17,17 @@ import (
 // body for every request.
 func jsonServer(t *testing.T, status int, body string) *typesafe.Client {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+	return observedJSONServer(t, status, body, nil)
+}
+
+// observedJSONServer is jsonServer that also passes each request body to observe.
+func observedJSONServer(t *testing.T, status int, body string, observe func([]byte)) *typesafe.Client {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if observe != nil {
+			data, _ := io.ReadAll(request.Body)
+			observe(data)
+		}
 		response.Header().Set("Content-Type", "application/json")
 		response.Header().Set("x-typesafe-request-id", "req_model")
 		response.WriteHeader(status)
